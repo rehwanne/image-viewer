@@ -2,68 +2,65 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
-	"os"
-	"path/filepath"
-
-	"github.com/gin-gonic/gin"
+	"sync"
 )
 
-const (
-	uploadFolder = "./images"
-	port         = ":8080"
+var (
+	currentImage     []byte
+	currentImageMime string
+	imageMutex      sync.RWMutex
 )
 
-func main() {
-	// Upload-Ordner erstellen falls nicht vorhanden
-	if err := os.MkdirAll(uploadFolder, os.ModePerm); err != nil {
-		fmt.Printf("Fehler beim Erstellen des Upload-Ordners: %v\n", err)
+func uploadImageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	router := gin.Default()
-	router.LoadHTMLGlob("templates/*")
+	// Max 10MB image
+	r.ParseMultipartForm(10 << 20)
 
-	// Nur das aktuelle Bild servieren
-	router.GET("/current-image", func(c *gin.Context) {
-		imgPath := filepath.Join(uploadFolder, "current.jpg")
-		c.File(imgPath)
-	})
+	file, handler, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "Error retrieving the image", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
 
-	router.GET("/", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "index.html", nil)
-	})
+	imageData, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Error reading the image", http.StatusInternalServerError)
+		return
+	}
 
-	router.POST("/upload-image", func(c *gin.Context) {
-		file, err := c.FormFile("image")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Kein Bild erhalten"})
-			return
-		}
+	imageMutex.Lock()
+	currentImage = imageData
+	currentImageMime = handler.Header.Get("Content-Type")
+	imageMutex.Unlock()
 
-		// Nur JPG/JPEG erlauben
-		ext := filepath.Ext(file.Filename)
-		if ext != ".jpg" && ext != ".jpeg" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Nur JPG/JPEG-Dateien erlaubt"})
-			return
-		}
+	fmt.Fprintf(w, "Image uploaded successfully!")
+}
 
-		// Altes Bild löschen
-		os.Remove(filepath.Join(uploadFolder, "current.jpg"))
+func imageHandler(w http.ResponseWriter, r *http.Request) {
+	imageMutex.RLock()
+	defer imageMutex.RUnlock()
 
-		// Neues Bild speichern
-		filePath := filepath.Join(uploadFolder, "current.jpg")
-		if err := c.SaveUploadedFile(file, filePath); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Fehler beim Speichern der Datei"})
-			return
-		}
+	if currentImage == nil {
+		http.Error(w, "No image available", http.StatusNotFound)
+		return
+	}
 
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Bild erfolgreich ersetzt",
-			"path":    "/current-image",
-		})
-	})
+	w.Header().Set("Content-Type", currentImageMime)
+	w.Write(currentImage)
+}
 
-	fmt.Printf("Server läuft auf http://localhost%s\n", port)
-	router.Run(port)
+func main() {
+	http.HandleFunc("/upload-image", uploadImageHandler)
+	http.HandleFunc("/", imageHandler)
+
+	port := ":8080"
+	fmt.Printf("Server running on port %s\n", port)
+	http.ListenAndServe(port, nil)
 }
