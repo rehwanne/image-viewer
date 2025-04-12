@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aktuelles Bild</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            margin-top: 20px;
+        }
+        .info {
+            margin-top: 10px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div id="image-container">
+        <img src="/current-image" onerror="this.style.display='none'" alt="Aktuelles Bild">
+        <p id="no-image" style="display: none;">Kein Bild vorhanden</p>
+    </div>
+
+    <script>
+        setInterval(() => {
+            const img = document.querySelector('img');
+            img.src = '/current-image?' + new Date().getTime(); // Cache umgehen
+            
+            img.onload = () => {
+                document.getElementById('no-image').style.display = 'none';
+                img.style.display = 'block';
+            };
+            
+            img.onerror = () => {
+                img.style.display = 'none';
+                document.getElementById('no-image').style.display = 'block';
+            };
+        }, 2000);
+    </script>
+</body>
+</html>
